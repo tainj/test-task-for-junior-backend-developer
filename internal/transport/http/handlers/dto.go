@@ -8,11 +8,11 @@ import (
 )
 
 type taskMutationDTO struct {
-	Title       string               `json:"title"`
-	Description string               `json:"description"`
-	Status      taskdomain.Status    `json:"status"`
-	RecurrenceType   *string         `json:"recurrence_type,omitempty"`
-	RecurrenceConfig json.RawMessage `json:"recurrence_config,omitempty"`
+	Title            string               `json:"title"`
+	Description      string               `json:"description"`
+	Status           taskdomain.Status    `json:"status"`
+	RecurrenceType   *string              `json:"recurrence_type,omitempty"`
+	RecurrenceConfig json.RawMessage      `json:"recurrence_config,omitempty"`
 }
 
 type taskDTO struct {

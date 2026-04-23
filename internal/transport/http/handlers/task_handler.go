@@ -31,8 +31,8 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Title:             req.Title,
 		Description:       req.Description,
 		Status:            req.Status,
-		RecurrenceType     &req.RecurrenceType,
-		RecurrenceConfig   json.RawMessage,
+		RecurrenceType:    req.RecurrenceType,
+		RecurrenceConfig:  req.RecurrenceConfig,
 	})
 	if err != nil {
 		writeUsecaseError(w, err)
