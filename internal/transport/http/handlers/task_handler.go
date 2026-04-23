@@ -28,9 +28,11 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	created, err := h.usecase.Create(r.Context(), taskusecase.CreateInput{
-		Title:       req.Title,
-		Description: req.Description,
-		Status:      req.Status,
+		Title:             req.Title,
+		Description:       req.Description,
+		Status:            req.Status,
+		RecurrenceType     &req.RecurrenceType,
+		RecurrenceConfig   json.RawMessage,
 	})
 	if err != nil {
 		writeUsecaseError(w, err)

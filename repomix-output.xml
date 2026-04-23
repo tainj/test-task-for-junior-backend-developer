@@ -1,0 +1,1212 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+cmd/
+  api/
+    main.go
+internal/
+  domain/
+    task/
+      errors.go
+      task.go
+  infrastructure/
+    postgres/
+      pool.go
+  repository/
+    postgres/
+      task_repository.go
+  transport/
+    http/
+      docs/
+        handler.go
+        openapi.json
+      handlers/
+        dto.go
+        task_handler.go
+      router.go
+  usecase/
+    task/
+      errors.go
+      ports.go
+      service.go
+migrations/
+  000002_add_recurrence.down.sql
+  000002_add_recurrence.up.sql
+  0001_create_tasks.up.sql
+.dockerignore
+.gitignore
+docker-compose.yml
+Dockerfile
+go.mod
+README.md
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="internal/domain/task/errors.go">
+package task
+
+import "errors"
+
+var ErrNotFound = errors.New("task not found")
+</file>
+
+<file path="internal/infrastructure/postgres/pool.go">
+package postgres
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+	if dsn == "" {
+		return nil, fmt.Errorf("database dsn is empty")
+	}
+
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+
+	return pool, nil
+}
+</file>
+
+<file path="internal/repository/postgres/task_repository.go">
+package postgres
+
+import (
+	"context"
+	"errors"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	taskdomain "example.com/taskservice/internal/domain/task"
+)
+
+type Repository struct {
+	pool *pgxpool.Pool
+}
+
+func New(pool *pgxpool.Pool) *Repository {
+	return &Repository{pool: pool}
+}
+
+func (r *Repository) Create(ctx context.Context, task *taskdomain.Task) (*taskdomain.Task, error) {
+	const query = `
+		INSERT INTO tasks (title, description, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, title, description, status, created_at, updated_at
+	`
+
+	row := r.pool.QueryRow(ctx, query, task.Title, task.Description, task.Status, task.CreatedAt, task.UpdatedAt)
+	created, err := scanTask(row)
+	if err != nil {
+		return nil, err
+	}
+
+	return created, nil
+}
+
+func (r *Repository) GetByID(ctx context.Context, id int64) (*taskdomain.Task, error) {
+	const query = `
+		SELECT id, title, description, status, created_at, updated_at
+		FROM tasks
+		WHERE id = $1
+	`
+
+	row := r.pool.QueryRow(ctx, query, id)
+	found, err := scanTask(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, taskdomain.ErrNotFound
+		}
+
+		return nil, err
+	}
+
+	return found, nil
+}
+
+func (r *Repository) Update(ctx context.Context, task *taskdomain.Task) (*taskdomain.Task, error) {
+	const query = `
+		UPDATE tasks
+		SET title = $1,
+			description = $2,
+			status = $3,
+			updated_at = $4
+		WHERE id = $5
+		RETURNING id, title, description, status, created_at, updated_at
+	`
+
+	row := r.pool.QueryRow(ctx, query, task.Title, task.Description, task.Status, task.UpdatedAt, task.ID)
+	updated, err := scanTask(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, taskdomain.ErrNotFound
+		}
+
+		return nil, err
+	}
+
+	return updated, nil
+}
+
+func (r *Repository) Delete(ctx context.Context, id int64) error {
+	const query = `DELETE FROM tasks WHERE id = $1`
+
+	result, err := r.pool.Exec(ctx, query, id)
+	if err != nil {
+		return err
+	}
+
+	if result.RowsAffected() == 0 {
+		return taskdomain.ErrNotFound
+	}
+
+	return nil
+}
+
+func (r *Repository) List(ctx context.Context) ([]taskdomain.Task, error) {
+	const query = `
+		SELECT id, title, description, status, created_at, updated_at
+		FROM tasks
+		ORDER BY id DESC
+	`
+
+	rows, err := r.pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	tasks := make([]taskdomain.Task, 0)
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+
+		tasks = append(tasks, *task)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return tasks, nil
+}
+
+type taskScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanTask(scanner taskScanner) (*taskdomain.Task, error) {
+	var (
+		task   taskdomain.Task
+		status string
+	)
+
+	if err := scanner.Scan(
+		&task.ID,
+		&task.Title,
+		&task.Description,
+		&status,
+		&task.CreatedAt,
+		&task.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+
+	task.Status = taskdomain.Status(status)
+
+	return &task, nil
+}
+</file>
+
+<file path="internal/transport/http/docs/handler.go">
+package docs
+
+import (
+	"embed"
+	"net/http"
+)
+
+//go:embed openapi.json
+var openAPISpec embed.FS
+
+type Handler struct {
+	spec []byte
+}
+
+func NewHandler() *Handler {
+	spec, err := openAPISpec.ReadFile("openapi.json")
+	if err != nil {
+		panic(err)
+	}
+
+	return &Handler{spec: spec}
+}
+
+func (h *Handler) ServeSpec(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+
+	_, _ = w.Write(h.spec)
+}
+
+func (h *Handler) ServeUI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+
+	_, _ = w.Write([]byte(swaggerUIHTML))
+}
+
+func (h *Handler) RedirectToUI(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/swagger/", http.StatusMovedPermanently)
+}
+
+var swaggerUIHTML = []byte(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Task Service Swagger</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    body { margin: 0; background: #f6f7fb; }
+    #swagger-ui { max-width: 1440px; margin: 0 auto; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+  <script>
+    window.onload = function() {
+      window.ui = SwaggerUIBundle({
+        url: '/swagger/openapi.json',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis],
+        layout: 'BaseLayout'
+      });
+    };
+  </script>
+</body>
+</html>`)
+</file>
+
+<file path="internal/transport/http/docs/openapi.json">
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Task Service API",
+    "version": "1.0.0",
+    "description": "CRUD API for tasks built with clean architecture."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Tasks",
+      "description": "Operations with tasks"
+    }
+  ],
+  "paths": {
+    "/api/v1/tasks": {
+      "get": {
+        "tags": ["Tasks"],
+        "summary": "List tasks",
+        "responses": {
+          "200": {
+            "description": "Task list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Task" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Tasks"],
+        "summary": "Create task",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateTaskRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created task",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Task" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" }
+        }
+      }
+    },
+    "/api/v1/tasks/{id}": {
+      "get": {
+        "tags": ["Tasks"],
+        "summary": "Get task by ID",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer", "format": "int64", "minimum": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Task" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "tags": ["Tasks"],
+        "summary": "Update task",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer", "format": "int64", "minimum": 1 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateTaskRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated task",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Task" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "delete": {
+        "tags": ["Tasks"],
+        "summary": "Delete task",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer", "format": "int64", "minimum": 1 }
+          }
+        ],
+        "responses": {
+          "204": { "description": "Deleted" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "BadRequest": {
+        "description": "Bad request",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Resource not found",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/Error" }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "CreateTaskRequest": {
+        "type": "object",
+        "required": ["title"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "example": "Prepare release"
+          },
+          "description": {
+            "type": "string",
+            "example": "Collect release notes and check migrations"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["new", "in_progress", "done"],
+            "example": "new"
+          }
+        }
+      },
+      "UpdateTaskRequest": {
+        "type": "object",
+        "required": ["title", "status"],
+        "properties": {
+          "title": {
+            "type": "string",
+            "example": "Prepare release"
+          },
+          "description": {
+            "type": "string",
+            "example": "Collect release notes and check migrations"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["new", "in_progress", "done"],
+            "example": "in_progress"
+          }
+        }
+      },
+      "Task": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer", "format": "int64", "example": 1 },
+          "title": { "type": "string", "example": "Prepare release" },
+          "description": {
+            "type": "string",
+            "example": "Collect release notes and check migrations"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["new", "in_progress", "done"],
+            "example": "new"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-03-24T00:00:00Z"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-03-24T00:00:00Z"
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string", "example": "task not found" }
+        }
+      }
+    }
+  }
+}
+</file>
+
+<file path="internal/transport/http/handlers/dto.go">
+package handlers
+
+import (
+	"encoding/json"
+	"time"
+
+	taskdomain "example.com/taskservice/internal/domain/task"
+)
+
+type taskMutationDTO struct {
+	Title       string               `json:"title"`
+	Description string               `json:"description"`
+	Status      taskdomain.Status    `json:"status"`
+	RecurrenceType   *string         `json:"recurrence_type,omitempty"`
+	RecurrenceConfig json.RawMessage `json:"recurrence_config,omitempty"`
+}
+
+type taskDTO struct {
+	ID          int64                `json:"id"`
+	Title       string               `json:"title"`
+	Description string               `json:"description"`
+	Status      taskdomain.Status    `json:"status"`
+
+	RecurrenceType   *string         `json:"recurrence_type,omitempty"`
+	RecurrenceConfig json.RawMessage `json:"recurrence_config,omitempty"`
+	NextRunDate      *time.Time      `json:"next_run_date,omitempty"`
+
+	CreatedAt   time.Time            `json:"created_at"`
+	UpdatedAt   time.Time            `json:"updated_at"`
+}
+
+func newTaskDTO(task *taskdomain.Task) taskDTO {
+	return taskDTO{
+		ID:          task.ID,
+		Title:       task.Title,
+		Description: task.Description,
+		Status:      task.Status,
+		RecurrenceType: task.RecurrenceType,
+		RecurrenceConfig: task.RecurrenceConfig,
+		NextRunDate: task.NextRunDate,
+		CreatedAt:   task.CreatedAt,
+		UpdatedAt:   task.UpdatedAt,
+	}
+}
+</file>
+
+<file path="internal/transport/http/handlers/task_handler.go">
+package handlers
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+
+	"github.com/gorilla/mux"
+
+	taskdomain "example.com/taskservice/internal/domain/task"
+	taskusecase "example.com/taskservice/internal/usecase/task"
+)
+
+type TaskHandler struct {
+	usecase taskusecase.Usecase
+}
+
+func NewTaskHandler(usecase taskusecase.Usecase) *TaskHandler {
+	return &TaskHandler{usecase: usecase}
+}
+
+func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
+	var req taskMutationDTO
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	created, err := h.usecase.Create(r.Context(), taskusecase.CreateInput{
+		Title:             req.Title,
+		Description:       req.Description,
+		Status:            req.Status,
+		RecurrenceType     &req.RecurrenceType,
+		RecurrenceConfig   json.RawMessage,
+	})
+	if err != nil {
+		writeUsecaseError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, newTaskDTO(created))
+}
+
+func (h *TaskHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+	id, err := getIDFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	task, err := h.usecase.GetByID(r.Context(), id)
+	if err != nil {
+		writeUsecaseError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newTaskDTO(task))
+}
+
+func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
+	id, err := getIDFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	var req taskMutationDTO
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	updated, err := h.usecase.Update(r.Context(), id, taskusecase.UpdateInput{
+		Title:       req.Title,
+		Description: req.Description,
+		Status:      req.Status,
+	})
+	if err != nil {
+		writeUsecaseError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, newTaskDTO(updated))
+}
+
+func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	id, err := getIDFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := h.usecase.Delete(r.Context(), id); err != nil {
+		writeUsecaseError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
+	tasks, err := h.usecase.List(r.Context())
+	if err != nil {
+		writeUsecaseError(w, err)
+		return
+	}
+
+	response := make([]taskDTO, 0, len(tasks))
+	for i := range tasks {
+		response = append(response, newTaskDTO(&tasks[i]))
+	}
+
+	writeJSON(w, http.StatusOK, response)
+}
+
+func getIDFromRequest(r *http.Request) (int64, error) {
+	rawID := mux.Vars(r)["id"]
+	if rawID == "" {
+		return 0, errors.New("missing task id")
+	}
+
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil {
+		return 0, errors.New("invalid task id")
+	}
+
+	if id <= 0 {
+		return 0, errors.New("invalid task id")
+	}
+
+	return id, nil
+}
+
+func decodeJSON(r *http.Request, dst any) error {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func writeUsecaseError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, taskdomain.ErrNotFound):
+		writeError(w, http.StatusNotFound, err)
+	case errors.Is(err, taskusecase.ErrInvalidInput):
+		writeError(w, http.StatusBadRequest, err)
+	default:
+		writeError(w, http.StatusInternalServerError, err)
+	}
+}
+
+func writeError(w http.ResponseWriter, status int, err error) {
+	writeJSON(w, status, map[string]string{
+		"error": err.Error(),
+	})
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+
+	_ = json.NewEncoder(w).Encode(payload)
+}
+</file>
+
+<file path="internal/transport/http/router.go">
+package transporthttp
+
+import (
+	"net/http"
+
+	"github.com/gorilla/mux"
+
+	swaggerdocs "example.com/taskservice/internal/transport/http/docs"
+	httphandlers "example.com/taskservice/internal/transport/http/handlers"
+)
+
+func NewRouter(taskHandler *httphandlers.TaskHandler, docsHandler *swaggerdocs.Handler) *mux.Router {
+	router := mux.NewRouter().StrictSlash(true)
+
+	router.HandleFunc("/swagger/openapi.json", docsHandler.ServeSpec).Methods(http.MethodGet)
+	router.HandleFunc("/swagger/", docsHandler.ServeUI).Methods(http.MethodGet)
+	router.HandleFunc("/swagger", docsHandler.RedirectToUI).Methods(http.MethodGet)
+
+	api := router.PathPrefix("/api/v1").Subrouter()
+
+	api.HandleFunc("/tasks", taskHandler.Create).Methods(http.MethodPost)
+	api.HandleFunc("/tasks", taskHandler.List).Methods(http.MethodGet)
+	api.HandleFunc("/tasks/{id:[0-9]+}", taskHandler.GetByID).Methods(http.MethodGet)
+	api.HandleFunc("/tasks/{id:[0-9]+}", taskHandler.Update).Methods(http.MethodPut)
+	api.HandleFunc("/tasks/{id:[0-9]+}", taskHandler.Delete).Methods(http.MethodDelete)
+
+	return router
+}
+</file>
+
+<file path="internal/usecase/task/errors.go">
+package task
+
+import "errors"
+
+var ErrInvalidInput = errors.New("invalid task input")
+</file>
+
+<file path="internal/usecase/task/ports.go">
+package task
+
+import (
+	"context"
+
+	taskdomain "example.com/taskservice/internal/domain/task"
+)
+
+type Repository interface {
+	Create(ctx context.Context, task *taskdomain.Task) (*taskdomain.Task, error)
+	GetByID(ctx context.Context, id int64) (*taskdomain.Task, error)
+	Update(ctx context.Context, task *taskdomain.Task) (*taskdomain.Task, error)
+	Delete(ctx context.Context, id int64) error
+	List(ctx context.Context) ([]taskdomain.Task, error)
+}
+
+type Usecase interface {
+	Create(ctx context.Context, input CreateInput) (*taskdomain.Task, error)
+	GetByID(ctx context.Context, id int64) (*taskdomain.Task, error)
+	Update(ctx context.Context, id int64, input UpdateInput) (*taskdomain.Task, error)
+	Delete(ctx context.Context, id int64) error
+	List(ctx context.Context) ([]taskdomain.Task, error)
+}
+
+type CreateInput struct {
+	Title       string
+	Description string
+	Status      taskdomain.Status
+}
+
+type UpdateInput struct {
+	Title       string
+	Description string
+	Status      taskdomain.Status
+}
+</file>
+
+<file path="internal/usecase/task/service.go">
+package task
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+
+	taskdomain "example.com/taskservice/internal/domain/task"
+)
+
+type Service struct {
+	repo Repository
+	now  func() time.Time
+}
+
+func NewService(repo Repository) *Service {
+	return &Service{
+		repo: repo,
+		now:  func() time.Time { return time.Now().UTC() },
+	}
+}
+
+func (s *Service) Create(ctx context.Context, input CreateInput) (*taskdomain.Task, error) {
+	normalized, err := validateCreateInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	model := &taskdomain.Task{
+		Title:       normalized.Title,
+		Description: normalized.Description,
+		Status:      normalized.Status,
+	}
+	now := s.now()
+	model.CreatedAt = now
+	model.UpdatedAt = now
+
+	created, err := s.repo.Create(ctx, model)
+	if err != nil {
+		return nil, err
+	}
+
+	return created, nil
+}
+
+func (s *Service) GetByID(ctx context.Context, id int64) (*taskdomain.Task, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("%w: id must be positive", ErrInvalidInput)
+	}
+
+	return s.repo.GetByID(ctx, id)
+}
+
+func (s *Service) Update(ctx context.Context, id int64, input UpdateInput) (*taskdomain.Task, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("%w: id must be positive", ErrInvalidInput)
+	}
+
+	normalized, err := validateUpdateInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	model := &taskdomain.Task{
+		ID:          id,
+		Title:       normalized.Title,
+		Description: normalized.Description,
+		Status:      normalized.Status,
+		UpdatedAt:   s.now(),
+	}
+
+	updated, err := s.repo.Update(ctx, model)
+	if err != nil {
+		return nil, err
+	}
+
+	return updated, nil
+}
+
+func (s *Service) Delete(ctx context.Context, id int64) error {
+	if id <= 0 {
+		return fmt.Errorf("%w: id must be positive", ErrInvalidInput)
+	}
+
+	return s.repo.Delete(ctx, id)
+}
+
+func (s *Service) List(ctx context.Context) ([]taskdomain.Task, error) {
+	return s.repo.List(ctx)
+}
+
+func validateCreateInput(input CreateInput) (CreateInput, error) {
+	input.Title = strings.TrimSpace(input.Title)
+	input.Description = strings.TrimSpace(input.Description)
+
+	if input.Title == "" {
+		return CreateInput{}, fmt.Errorf("%w: title is required", ErrInvalidInput)
+	}
+
+	if input.Status == "" {
+		input.Status = taskdomain.StatusNew
+	}
+
+	if !input.Status.Valid() {
+		return CreateInput{}, fmt.Errorf("%w: invalid status", ErrInvalidInput)
+	}
+
+	return input, nil
+}
+
+func validateUpdateInput(input UpdateInput) (UpdateInput, error) {
+	input.Title = strings.TrimSpace(input.Title)
+	input.Description = strings.TrimSpace(input.Description)
+
+	if input.Title == "" {
+		return UpdateInput{}, fmt.Errorf("%w: title is required", ErrInvalidInput)
+	}
+
+	if !input.Status.Valid() {
+		return UpdateInput{}, fmt.Errorf("%w: invalid status", ErrInvalidInput)
+	}
+
+	return input, nil
+}
+</file>
+
+<file path="migrations/000002_add_recurrence.down.sql">
+BEGIN;
+
+DROP INDEX IF EXISTS idx_tasks_parent;
+DROP INDEX IF EXISTS idx_tasks_next_run;
+
+ALTER TABLE tasks
+    DROP COLUMN IF EXISTS parent_task_id,
+    DROP COLUMN IF EXISTS next_run_date,
+    DROP COLUMN IF EXISTS recurrence_config,
+    DROP COLUMN IF EXISTS recurrence_type;
+
+COMMIT;
+</file>
+
+<file path="migrations/000002_add_recurrence.up.sql">
+BEGIN;
+
+ALTER TABLE tasks
+    ADD COLUMN IF NOT EXISTS recurrence_type VARCHAR(20),
+    ADD COLUMN IF NOT EXISTS recurrence_config JSONB,
+    ADD COLUMN IF NOT EXISTS next_run_date TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS parent_task_id BIGINT REFERENCES tasks(id) ON DELETE CASCADE;
+
+-- Частичные индексы: быстрые и лёгкие, так как заполнены только у периодических задач
+CREATE INDEX IF NOT EXISTS idx_tasks_next_run ON tasks(next_run_date) WHERE next_run_date IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_task_id) WHERE parent_task_id IS NOT NULL;
+
+COMMIT;
+</file>
+
+<file path="migrations/0001_create_tasks.up.sql">
+CREATE TABLE IF NOT EXISTS tasks (
+	id BIGSERIAL PRIMARY KEY,
+	title TEXT NOT NULL,
+	description TEXT NOT NULL DEFAULT '',
+	status TEXT NOT NULL,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks (status);
+</file>
+
+<file path=".dockerignore">
+.git
+.idea
+.vscode
+bin
+tmp
+.DS_Store
+README.md
+</file>
+
+<file path=".gitignore">
+.ruby-lsp
+</file>
+
+<file path="Dockerfile">
+FROM golang:1.23.0-alpine AS builder
+
+WORKDIR /src
+
+RUN apk add --no-cache ca-certificates
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/taskservice ./cmd/api
+
+FROM alpine:3.21
+
+WORKDIR /app
+
+RUN apk add --no-cache ca-certificates
+
+COPY --from=builder /out/taskservice /app/taskservice
+
+EXPOSE 8080
+
+CMD ["/app/taskservice"]
+</file>
+
+<file path="go.mod">
+module example.com/taskservice
+
+go 1.23.0
+
+require (
+	github.com/gorilla/mux v1.8.1
+	github.com/jackc/pgx/v5 v5.7.6
+)
+
+require (
+	github.com/jackc/pgpassfile v1.0.0 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	golang.org/x/crypto v0.37.0 // indirect
+	golang.org/x/sync v0.13.0 // indirect
+	golang.org/x/text v0.24.0 // indirect
+)
+</file>
+
+<file path="README.md">
+# Task Service
+
+Сервис для управления задачами с HTTP API на Go.
+
+## Требования
+
+- Go `1.23+`
+- Docker и Docker Compose
+
+## Быстрый запуск через Docker Compose
+
+```bash
+docker compose up --build
+```
+
+После запуска сервис будет доступен по адресу `http://localhost:8080`.
+
+Если `postgres` уже запускался ранее со старой схемой, пересоздай volume:
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+Причина в том, что SQL-файл из `migrations/0001_create_tasks.up.sql` монтируется в `docker-entrypoint-initdb.d` и применяется только при инициализации пустого data volume.
+
+## Swagger
+
+Swagger UI:
+
+```text
+http://localhost:8080/swagger/
+```
+
+OpenAPI JSON:
+
+```text
+http://localhost:8080/swagger/openapi.json
+```
+
+## API
+
+Базовый префикс API:
+
+```text
+/api/v1
+```
+
+Основные маршруты:
+
+- `POST /api/v1/tasks`
+- `GET /api/v1/tasks`
+- `GET /api/v1/tasks/{id}`
+- `PUT /api/v1/tasks/{id}`
+- `DELETE /api/v1/tasks/{id}`
+</file>
+
+<file path="internal/domain/task/task.go">
+package task
+
+import (
+	"encoding/json"
+	"time"
+)
+
+type Status string
+
+const (
+	StatusNew        Status = "new"
+	StatusInProgress Status = "in_progress"
+	StatusDone       Status = "done"
+)
+
+type Task struct {
+	ID               int64           `json:"id"`
+	Title            string          `json:"title"`
+	Description      string          `json:"description"`
+	Status           Status          `json:"status"`
+	
+	// Новые поля периодичности
+	RecurrenceType   *string         `json:"recurrence_type,omitempty"`   // daily, monthly, dates, even_odd
+	RecurrenceConfig json.RawMessage `json:"recurrence_config,omitempty"` // хранит сырой JSONB без base64-кодирования
+	NextRunDate      *time.Time      `json:"next_run_date,omitempty"`     // дата следующего запуска шаблона
+	ParentTaskID     *int64          `json:"-"`                           // ссылка на шаблон (NULL = шаблон, не NULL = экземпляр)
+	
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+}
+
+func (s Status) Valid() bool {
+	switch s {
+	case StatusNew, StatusInProgress, StatusDone:
+		return true
+	default:
+		return false
+	}
+}
+</file>
+
+</files>
