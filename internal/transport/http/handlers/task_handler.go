@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -14,10 +15,11 @@ import (
 
 type TaskHandler struct {
 	usecase taskusecase.Usecase
+	logger *slog.Logger
 }
 
-func NewTaskHandler(usecase taskusecase.Usecase) *TaskHandler {
-	return &TaskHandler{usecase: usecase}
+func NewTaskHandler(usecase taskusecase.Usecase, logger *slog.Logger) *TaskHandler {
+	return &TaskHandler{usecase: usecase, logger: logger}
 }
 
 func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {

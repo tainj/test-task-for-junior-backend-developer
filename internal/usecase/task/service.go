@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -12,9 +13,10 @@ import (
 type Service struct {
 	repo Repository
 	now  func() time.Time
+	logger *slog.Logger
 }
 
-func NewService(repo Repository) *Service {
+func NewService(repo Repository, logger *slog.Logger) *Service {
 	return &Service{
 		repo: repo,
 		now:  func() time.Time { return time.Now().UTC() },

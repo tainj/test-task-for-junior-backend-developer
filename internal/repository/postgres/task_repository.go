@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,10 +14,11 @@ import (
 
 type Repository struct {
 	pool *pgxpool.Pool
+	logger *slog.Logger
 }
 
-func New(pool *pgxpool.Pool) *Repository {
-	return &Repository{pool: pool}
+func New(pool *pgxpool.Pool, logger *slog.Logger) *Repository {
+	return &Repository{pool: pool, logger: logger}
 }
 
 func (r *Repository) Create(ctx context.Context, task *taskdomain.Task) (*taskdomain.Task, error) {

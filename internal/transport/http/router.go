@@ -1,16 +1,20 @@
 package transporthttp
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/gorilla/mux"
 
+	"example.com/taskservice/internal/middleware"
 	swaggerdocs "example.com/taskservice/internal/transport/http/docs"
 	httphandlers "example.com/taskservice/internal/transport/http/handlers"
 )
 
-func NewRouter(taskHandler *httphandlers.TaskHandler, docsHandler *swaggerdocs.Handler) *mux.Router {
+func NewRouter(taskHandler *httphandlers.TaskHandler, docsHandler *swaggerdocs.Handler, logger *slog.Logger) *mux.Router {
 	router := mux.NewRouter().StrictSlash(true)
+
+	router.Use(middleware.Logging(logger))
 
 	router.HandleFunc("/swagger/openapi.json", docsHandler.ServeSpec).Methods(http.MethodGet)
 	router.HandleFunc("/swagger/", docsHandler.ServeUI).Methods(http.MethodGet)
