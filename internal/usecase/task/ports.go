@@ -2,6 +2,8 @@ package task
 
 import (
 	"context"
+	"encoding/json"
+	"time"
 
 	taskdomain "example.com/taskservice/internal/domain/task"
 )
@@ -11,7 +13,9 @@ type Repository interface {
 	GetByID(ctx context.Context, id int64) (*taskdomain.Task, error)
 	Update(ctx context.Context, task *taskdomain.Task) (*taskdomain.Task, error)
 	Delete(ctx context.Context, id int64) error
-	List(ctx context.Context) ([]taskdomain.Task, error)
+	List(ctx context.Context, filter string) ([]taskdomain.Task, error)
+	GetDueTemplates(ctx context.Context, asOf time.Time, limit int) ([]taskdomain.Task, error)
+	CreateInstanceAndAdvanceTemplate(ctx context.Context, templateID int64, asOf time.Time, nextRunDate *time.Time, now time.Time) (*taskdomain.Task, error)
 }
 
 type Usecase interface {
@@ -19,13 +23,15 @@ type Usecase interface {
 	GetByID(ctx context.Context, id int64) (*taskdomain.Task, error)
 	Update(ctx context.Context, id int64, input UpdateInput) (*taskdomain.Task, error)
 	Delete(ctx context.Context, id int64) error
-	List(ctx context.Context) ([]taskdomain.Task, error)
+	List(ctx context.Context, filter string) ([]taskdomain.Task, error)
 }
 
 type CreateInput struct {
-	Title       string
-	Description string
-	Status      taskdomain.Status
+	Title            string
+	Description      string
+	Status           taskdomain.Status
+	RecurrenceType   *string
+	RecurrenceConfig json.RawMessage
 }
 
 type UpdateInput struct {

@@ -21,6 +21,19 @@
       "get": {
         "tags": ["Tasks"],
         "summary": "List tasks",
+        "parameters": [
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["all", "templates", "instances"],
+              "default": "all"
+            },
+            "description": "Фильтр списка задач: все, только шаблоны или только экземпляры"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Task list",
@@ -169,6 +182,17 @@
             "type": "string",
             "enum": ["new", "in_progress", "done"],
             "example": "new"
+          },
+          "recurrence_type": {
+            "type": "string",
+            "enum": ["daily", "monthly", "dates", "even_odd"],
+            "example": "daily"
+          },
+          "recurrence_config": {
+            "type": "object",
+            "example": {
+              "interval_days": 1
+            }
           }
         }
       },
@@ -204,6 +228,22 @@
             "type": "string",
             "enum": ["new", "in_progress", "done"],
             "example": "new"
+          },
+          "recurrence_type": {
+            "type": "string",
+            "enum": ["daily", "monthly", "dates", "even_odd"],
+            "example": "daily"
+          },
+          "recurrence_config": {
+            "type": "object",
+            "example": {
+              "interval_days": 1
+            }
+          },
+          "next_run_date": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-04-25T10:00:00Z"
           },
           "created_at": {
             "type": "string",

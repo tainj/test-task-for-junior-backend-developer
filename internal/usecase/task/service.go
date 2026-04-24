@@ -1,8 +1,11 @@
 package task
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -10,14 +13,22 @@ import (
 )
 
 type Service struct {
-	repo Repository
-	now  func() time.Time
+	repo   Repository
+	now    func() time.Time
+	logger *slog.Logger
 }
 
-func NewService(repo Repository) *Service {
+const (
+	ListFilterAll       = "all"
+	ListFilterTemplates = "templates"
+	ListFilterInstances = "instances"
+)
+
+func NewService(repo Repository, logger *slog.Logger) *Service {
 	return &Service{
-		repo: repo,
-		now:  func() time.Time { return time.Now().UTC() },
+		repo:   repo,
+		now:    func() time.Time { return time.Now().UTC() },
+		logger: logger,
 	}
 }
 
@@ -28,13 +39,19 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*taskdomain.Ta
 	}
 
 	model := &taskdomain.Task{
-		Title:       normalized.Title,
-		Description: normalized.Description,
-		Status:      normalized.Status,
+		Title:            normalized.Title,
+		Description:      normalized.Description,
+		Status:           normalized.Status,
+		RecurrenceType:   normalized.RecurrenceType,
+		RecurrenceConfig: normalized.RecurrenceConfig,
 	}
 	now := s.now()
 	model.CreatedAt = now
 	model.UpdatedAt = now
+	if normalized.RecurrenceType != nil {
+		nextRunDate := now
+		model.NextRunDate = &nextRunDate
+	}
 
 	created, err := s.repo.Create(ctx, model)
 	if err != nil {
@@ -86,8 +103,17 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	return s.repo.Delete(ctx, id)
 }
 
-func (s *Service) List(ctx context.Context) ([]taskdomain.Task, error) {
-	return s.repo.List(ctx)
+func (s *Service) List(ctx context.Context, filter string) ([]taskdomain.Task, error) {
+	if filter == "" {
+		filter = ListFilterAll
+	}
+
+	switch filter {
+	case ListFilterAll, ListFilterTemplates, ListFilterInstances:
+		return s.repo.List(ctx, filter)
+	default:
+		return nil, fmt.Errorf("%w: invalid list filter", ErrInvalidInput)
+	}
 }
 
 func validateCreateInput(input CreateInput) (CreateInput, error) {
@@ -106,7 +132,51 @@ func validateCreateInput(input CreateInput) (CreateInput, error) {
 		return CreateInput{}, fmt.Errorf("%w: invalid status", ErrInvalidInput)
 	}
 
+	recurrenceType, err := normalizeRecurrenceType(input.RecurrenceType)
+	if err != nil {
+		return CreateInput{}, err
+	}
+	input.RecurrenceType = recurrenceType
+
+	recurrenceConfig := bytes.TrimSpace(input.RecurrenceConfig)
+	if input.RecurrenceType == nil {
+		if len(recurrenceConfig) > 0 {
+			return CreateInput{}, fmt.Errorf("%w: recurrence_config requires recurrence_type", ErrInvalidInput)
+		}
+
+		input.RecurrenceConfig = nil
+		return input, nil
+	}
+
+	if len(recurrenceConfig) == 0 {
+		return CreateInput{}, fmt.Errorf("%w: recurrence_config is required for recurring tasks", ErrInvalidInput)
+	}
+
+	if !json.Valid(recurrenceConfig) {
+		return CreateInput{}, fmt.Errorf("%w: recurrence_config must be valid json", ErrInvalidInput)
+	}
+
+	input.RecurrenceConfig = json.RawMessage(recurrenceConfig)
+
 	return input, nil
+}
+
+func normalizeRecurrenceType(raw *string) (*string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+
+	normalized := strings.ToLower(strings.TrimSpace(*raw))
+	if normalized == "" {
+		return nil, nil
+	}
+
+	switch normalized {
+	case "daily", "monthly", "dates", "even_odd":
+		return &normalized, nil
+	default:
+		return nil, fmt.Errorf("%w: unsupported recurrence_type", ErrInvalidInput)
+	}
 }
 
 func validateUpdateInput(input UpdateInput) (UpdateInput, error) {

@@ -19,8 +19,8 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelDebug,
 	}))
 
 	cfg := loadConfig()
@@ -35,11 +35,13 @@ func main() {
 	}
 	defer pool.Close()
 
-	taskRepo := postgresrepo.New(pool)
-	taskUsecase := task.NewService(taskRepo)
-	taskHandler := httphandlers.NewTaskHandler(taskUsecase)
+	taskRepo := postgresrepo.New(pool, logger)
+	taskUsecase := task.NewService(taskRepo, logger)
+	go taskUsecase.StartRecurringWorker(ctx, 30*time.Second)
+
+	taskHandler := httphandlers.NewTaskHandler(taskUsecase, logger)
 	docsHandler := swaggerdocs.NewHandler()
-	router := transporthttp.NewRouter(taskHandler, docsHandler)
+	router := transporthttp.NewRouter(taskHandler, docsHandler, logger)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
