@@ -53,3 +53,13 @@ http://localhost:8080/swagger/openapi.json
 - `GET /api/v1/tasks/{id}`
 - `PUT /api/v1/tasks/{id}`
 - `DELETE /api/v1/tasks/{id}`
+
+## Повторяющиеся задачи
+
+При создании задачи можно передать поля:
+
+- `recurrence_type`: `daily`, `monthly`, `dates`, `even_odd`
+- `recurrence_config`: JSON-конфиг для выбранного типа
+
+Если у задачи задана периодичность, она сохраняется как шаблон, а фоновый воркер
+периодически создаёт экземпляры задач и сдвигает `next_run_date`.
