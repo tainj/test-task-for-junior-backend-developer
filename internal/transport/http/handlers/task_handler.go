@@ -15,7 +15,7 @@ import (
 
 type TaskHandler struct {
 	usecase taskusecase.Usecase
-	logger *slog.Logger
+	logger  *slog.Logger
 }
 
 func NewTaskHandler(usecase taskusecase.Usecase, logger *slog.Logger) *TaskHandler {
@@ -23,52 +23,68 @@ func NewTaskHandler(usecase taskusecase.Usecase, logger *slog.Logger) *TaskHandl
 }
 
 func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
+	h.logger.Debug("create task: request received")
+
 	var req taskMutationDTO
 	if err := decodeJSON(r, &req); err != nil {
+		h.logger.Error("create task: invalid request body", "error", err)
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
 	created, err := h.usecase.Create(r.Context(), taskusecase.CreateInput{
-		Title:             req.Title,
-		Description:       req.Description,
-		Status:            req.Status,
-		RecurrenceType:    req.RecurrenceType,
-		RecurrenceConfig:  req.RecurrenceConfig,
+		Title:            req.Title,
+		Description:      req.Description,
+		Status:           req.Status,
+		RecurrenceType:   req.RecurrenceType,
+		RecurrenceConfig: req.RecurrenceConfig,
 	})
 	if err != nil {
+		h.logger.Error("create task: usecase failed", "error", err)
 		writeUsecaseError(w, err)
 		return
 	}
+
+	h.logger.Info("task created", "task_id", created.ID, "title", created.Title)
 
 	writeJSON(w, http.StatusCreated, newTaskDTO(created))
 }
 
 func (h *TaskHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+	h.logger.Debug("get task by id: request received")
+
 	id, err := getIDFromRequest(r)
 	if err != nil {
+		h.logger.Error("get task by id: invalid id", "error", err)
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
 	task, err := h.usecase.GetByID(r.Context(), id)
 	if err != nil {
+		h.logger.Error("get task by id: usecase failed", "task_id", id, "error", err)
 		writeUsecaseError(w, err)
 		return
 	}
+
+	h.logger.Info("task fetched", "task_id", task.ID)
 
 	writeJSON(w, http.StatusOK, newTaskDTO(task))
 }
 
 func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
+	h.logger.Debug("update task: request received")
+
 	id, err := getIDFromRequest(r)
 	if err != nil {
+		h.logger.Error("update task: invalid id", "error", err)
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
 	var req taskMutationDTO
 	if err := decodeJSON(r, &req); err != nil {
+		h.logger.Error("update task: invalid request body", "task_id", id, "error", err)
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
@@ -79,31 +95,43 @@ func (h *TaskHandler) Update(w http.ResponseWriter, r *http.Request) {
 		Status:      req.Status,
 	})
 	if err != nil {
+		h.logger.Error("update task: usecase failed", "task_id", id, "error", err)
 		writeUsecaseError(w, err)
 		return
 	}
+
+	h.logger.Info("task updated", "task_id", updated.ID, "title", updated.Title)
 
 	writeJSON(w, http.StatusOK, newTaskDTO(updated))
 }
 
 func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	h.logger.Debug("delete task: request received")
+
 	id, err := getIDFromRequest(r)
 	if err != nil {
+		h.logger.Error("delete task: invalid id", "error", err)
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
 	if err := h.usecase.Delete(r.Context(), id); err != nil {
+		h.logger.Error("delete task: usecase failed", "task_id", id, "error", err)
 		writeUsecaseError(w, err)
 		return
 	}
+
+	h.logger.Info("task deleted", "task_id", id)
 
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
+	h.logger.Debug("list tasks: request received")
+
 	tasks, err := h.usecase.List(r.Context())
 	if err != nil {
+		h.logger.Error("list tasks: usecase failed", "error", err)
 		writeUsecaseError(w, err)
 		return
 	}
@@ -112,6 +140,8 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 	for i := range tasks {
 		response = append(response, newTaskDTO(&tasks[i]))
 	}
+
+	h.logger.Info("tasks listed", "count", len(response))
 
 	writeJSON(w, http.StatusOK, response)
 }
