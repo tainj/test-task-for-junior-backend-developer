@@ -127,11 +127,12 @@ func (h *TaskHandler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
-	h.logger.Debug("list tasks: request received")
+	filter := r.URL.Query().Get("filter")
+	h.logger.Debug("list tasks: request received", "filter", filter)
 
-	tasks, err := h.usecase.List(r.Context())
+	tasks, err := h.usecase.List(r.Context(), filter)
 	if err != nil {
-		h.logger.Error("list tasks: usecase failed", "error", err)
+		h.logger.Error("list tasks: usecase failed", "filter", filter, "error", err)
 		writeUsecaseError(w, err)
 		return
 	}
@@ -141,7 +142,7 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 		response = append(response, newTaskDTO(&tasks[i]))
 	}
 
-	h.logger.Info("tasks listed", "count", len(response))
+	h.logger.Info("tasks listed", "filter", filter, "count", len(response))
 
 	writeJSON(w, http.StatusOK, response)
 }

@@ -2,6 +2,7 @@ package task
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	taskdomain "example.com/taskservice/internal/domain/task"
@@ -52,5 +53,17 @@ func TestValidateCreateInput_NormalizesRecurrenceType(t *testing.T) {
 	}
 	if *normalized.RecurrenceType != "daily" {
 		t.Fatalf("expected daily, got %s", *normalized.RecurrenceType)
+	}
+}
+
+func TestServiceList_InvalidFilter(t *testing.T) {
+	s := &Service{}
+
+	_, err := s.List(nil, "invalid")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("expected ErrInvalidInput, got %v", err)
 	}
 }

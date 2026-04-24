@@ -95,12 +95,22 @@ func (r *Repository) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (r *Repository) List(ctx context.Context) ([]taskdomain.Task, error) {
-	const query = `
+func (r *Repository) List(ctx context.Context, filter string) ([]taskdomain.Task, error) {
+	query := `
 		SELECT id, title, description, status, recurrence_type, recurrence_config, next_run_date, parent_task_id, created_at, updated_at
 		FROM tasks
-		ORDER BY id DESC
 	`
+
+	switch filter {
+	case "templates":
+		query += " WHERE parent_task_id IS NULL"
+	case "instances":
+		query += " WHERE parent_task_id IS NOT NULL"
+	case "", "all":
+		// no-op
+	}
+
+	query += " ORDER BY id DESC"
 
 	rows, err := r.pool.Query(ctx, query)
 	if err != nil {

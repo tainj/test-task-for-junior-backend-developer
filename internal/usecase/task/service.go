@@ -18,6 +18,12 @@ type Service struct {
 	logger *slog.Logger
 }
 
+const (
+	ListFilterAll       = "all"
+	ListFilterTemplates = "templates"
+	ListFilterInstances = "instances"
+)
+
 func NewService(repo Repository, logger *slog.Logger) *Service {
 	return &Service{
 		repo:   repo,
@@ -97,8 +103,17 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	return s.repo.Delete(ctx, id)
 }
 
-func (s *Service) List(ctx context.Context) ([]taskdomain.Task, error) {
-	return s.repo.List(ctx)
+func (s *Service) List(ctx context.Context, filter string) ([]taskdomain.Task, error) {
+	if filter == "" {
+		filter = ListFilterAll
+	}
+
+	switch filter {
+	case ListFilterAll, ListFilterTemplates, ListFilterInstances:
+		return s.repo.List(ctx, filter)
+	default:
+		return nil, fmt.Errorf("%w: invalid list filter", ErrInvalidInput)
+	}
 }
 
 func validateCreateInput(input CreateInput) (CreateInput, error) {

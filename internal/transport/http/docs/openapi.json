@@ -21,6 +21,19 @@
       "get": {
         "tags": ["Tasks"],
         "summary": "List tasks",
+        "parameters": [
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["all", "templates", "instances"],
+              "default": "all"
+            },
+            "description": "Фильтр списка задач: все, только шаблоны или только экземпляры"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Task list",

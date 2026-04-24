@@ -116,7 +116,7 @@ func calculateNextRunDate(recurrenceType string, recurrenceConfig json.RawMessag
 
 		next := base.AddDate(0, cfg.IntervalMonths, 0)
 		if cfg.Day != nil {
-			if *cfg.Day < 1 || *cfg.Day > 31 {
+			if *cfg.Day < 1 || *cfg.Day > 30 {
 				return nil, fmt.Errorf("invalid monthly recurrence day")
 			}
 			targetDay := *cfg.Day

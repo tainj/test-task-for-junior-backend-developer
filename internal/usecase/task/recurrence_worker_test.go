@@ -53,3 +53,13 @@ func TestCalculateNextRunDate_EvenOdd(t *testing.T) {
 		t.Fatalf("expected %v, got %v", expected, *next)
 	}
 }
+
+func TestCalculateNextRunDate_MonthlyDayOver30Invalid(t *testing.T) {
+	current := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC)
+	cfg := json.RawMessage(`{"interval_months":1,"day":31}`)
+
+	_, err := calculateNextRunDate("monthly", cfg, current)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
