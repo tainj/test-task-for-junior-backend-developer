@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	taskdomain "example.com/taskservice/internal/domain/task"
 )
@@ -13,6 +14,8 @@ type Repository interface {
 	Update(ctx context.Context, task *taskdomain.Task) (*taskdomain.Task, error)
 	Delete(ctx context.Context, id int64) error
 	List(ctx context.Context) ([]taskdomain.Task, error)
+	GetDueTemplates(ctx context.Context, asOf time.Time, limit int) ([]taskdomain.Task, error)
+	CreateInstanceAndAdvanceTemplate(ctx context.Context, templateID int64, asOf time.Time, nextRunDate *time.Time, now time.Time) (*taskdomain.Task, error)
 }
 
 type Usecase interface {

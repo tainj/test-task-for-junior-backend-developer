@@ -37,6 +37,8 @@ func main() {
 
 	taskRepo := postgresrepo.New(pool, logger)
 	taskUsecase := task.NewService(taskRepo, logger)
+	go taskUsecase.StartRecurringWorker(ctx, 30*time.Second)
+
 	taskHandler := httphandlers.NewTaskHandler(taskUsecase, logger)
 	docsHandler := swaggerdocs.NewHandler()
 	router := transporthttp.NewRouter(taskHandler, docsHandler, logger)
